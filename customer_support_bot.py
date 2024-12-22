@@ -1,17 +1,11 @@
 import os
 import random
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
 from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler, MessageHandler, Filters
-from flask import Flask
 
-# Flask App for Dummy Server (to keep the app live)
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "Bot is running successfully!"
-
-# Bot token and Admin Chat ID
+# Bot token and admin chat ID
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # Replace with your admin's chat ID
 
@@ -97,8 +91,22 @@ def handle_callbacks(update: Update, context: CallbackContext) -> None:
     elif query_data == 'back_to_menu':
         back_to_menu(update, context)
 
+# Dummy HTTP Server
+class DummyServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b"Bot is running successfully!")
+
+def run_http_server():
+    server_address = ('', int(os.environ.get("PORT", 8000)))  # Default port 8000
+    httpd = HTTPServer(server_address, DummyServer)
+    httpd.serve_forever()
+
 # Main Function
 def main():
+    # Start polling
     updater = Updater(TOKEN, use_context=True)
     dispatcher = updater.dispatcher
 
@@ -111,11 +119,11 @@ def main():
     # Message Handlers
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_user_message))
 
-    # Start Polling
-    updater.start_polling()
+    # Run the polling bot in a thread
+    Thread(target=updater.start_polling).start()
 
-    # Start Flask App
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    # Start the dummy HTTP server
+    run_http_server()
 
 if __name__ == '__main__':
     main()
