@@ -40,42 +40,41 @@ def handle_user_message(update: Update, context: CallbackContext) -> None:
     user_message = update.message.text
 
     # Save user details in the map
-    user_message_map[user_id] = username
+    user_message_map[update.message.message_id] = user_id
 
     # Forward user message to admin
     if ADMIN_CHAT_ID:
-        context.bot.send_message(
+        forwarded_message = context.bot.send_message(
             chat_id=ADMIN_CHAT_ID,
             text=f"📩 *Message from @{username} (ID: {user_id}):*\n\n{user_message}",
             parse_mode=ParseMode.MARKDOWN
         )
+        # Save forwarded message ID for tracking replies
+        user_message_map[forwarded_message.message_id] = user_id
+
     update.message.reply_text("✅ Your message has been sent to the admin. Please wait for a reply.")
 
 # Handle Admin Replies
 def handle_admin_reply(update: Update, context: CallbackContext) -> None:
-    admin_message = update.message.text
+    if update.message.reply_to_message:
+        original_message_id = update.message.reply_to_message.message_id
 
-    # Check if the message starts with "reply:" to identify a reply to a user
-    if admin_message.startswith("reply:"):
-        try:
-            # Parse user ID and reply message
-            parts = admin_message.split(":", 2)
-            user_id = int(parts[1].strip())
-            reply_message = parts[2].strip()
+        # Check if this message corresponds to a user
+        if original_message_id in user_message_map:
+            user_id = user_message_map[original_message_id]
+            admin_reply = update.message.text
 
-            # Send the reply to the user
+            # Send the reply to the original user
             context.bot.send_message(
                 chat_id=user_id,
-                text=f"📩 *Reply from Admin:*\n\n{reply_message}",
+                text=f"📩 *Reply from Admin:*\n\n{admin_reply}",
                 parse_mode=ParseMode.MARKDOWN
             )
             update.message.reply_text("✅ Reply sent to the user.")
-        except (IndexError, ValueError):
-            update.message.reply_text("❌ Invalid reply format. Use `reply:<user_id>:<message>`.")
+        else:
+            update.message.reply_text("❌ Unable to find the original user. Please ensure the message was forwarded correctly.")
     else:
-        update.message.reply_text(
-            "❌ To reply to a user, use the format `reply:<user_id>:<message>`."
-        )
+        update.message.reply_text("❌ To reply to a user, reply to their forwarded message directly.")
 
 # Callback Query Handler
 def handle_callbacks(update: Update, context: CallbackContext) -> None:
