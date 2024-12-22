@@ -9,6 +9,9 @@ from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQuery
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # Replace with your admin's chat ID
 
+# A dictionary to track user messages and their IDs
+user_message_map = {}
+
 # Welcome Message
 def start(update: Update, context: CallbackContext) -> None:
     keyboard = [
@@ -24,38 +27,6 @@ def start(update: Update, context: CallbackContext) -> None:
         parse_mode=ParseMode.MARKDOWN
     )
 
-# Services Menu
-def view_services(update: Update, context: CallbackContext) -> None:
-    keyboard = [
-        [InlineKeyboardButton("🌐 Web Development", callback_data='service_web')],
-        [InlineKeyboardButton("🤖 Telegram Bot", callback_data='service_bot')],
-        [InlineKeyboardButton("🛠️ Custom Project", callback_data='service_custom')],
-        [InlineKeyboardButton("⬅️ Back", callback_data='back_to_menu')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    update.callback_query.message.edit_text(
-        "💼 *Our Services*\n\nChoose a service you’re interested in:",
-        reply_markup=reply_markup,
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-# Handle Individual Services
-def handle_service_selection(update: Update, context: CallbackContext) -> None:
-    query_data = update.callback_query.data
-    service_map = {
-        "service_web": "🌐 *Web Development*\n\nWe build stunning websites tailored to your needs.",
-        "service_bot": "🤖 *Telegram Bot*\n\nGet a custom bot for automation, support, and more.",
-        "service_custom": "🛠️ *Custom Project*\n\nTell us your requirements and we'll bring your idea to life!"
-    }
-    selected_service = service_map.get(query_data, "Invalid selection")
-    keyboard = [[InlineKeyboardButton("📩 Chat Admin", callback_data='chat_admin')]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    update.callback_query.message.edit_text(
-        f"{selected_service}\n\nClick below to chat with our admin for more details.",
-        reply_markup=reply_markup,
-        parse_mode=ParseMode.MARKDOWN
-    )
-
 # Chat Admin
 def chat_admin(update: Update, context: CallbackContext) -> None:
     update.callback_query.message.reply_text(
@@ -64,32 +35,53 @@ def chat_admin(update: Update, context: CallbackContext) -> None:
 
 # Handle User Messages
 def handle_user_message(update: Update, context: CallbackContext) -> None:
-    user_message = update.message.text
+    user_id = update.message.chat.id
     username = update.message.chat.username or "Anonymous"
+    user_message = update.message.text
+
+    # Save user details in the map
+    user_message_map[user_id] = username
+
     # Forward user message to admin
     if ADMIN_CHAT_ID:
         context.bot.send_message(
             chat_id=ADMIN_CHAT_ID,
-            text=f"📩 *Message from @{username}:*\n\n{user_message}",
+            text=f"📩 *Message from @{username} (ID: {user_id}):*\n\n{user_message}",
             parse_mode=ParseMode.MARKDOWN
         )
     update.message.reply_text("✅ Your message has been sent to the admin. Please wait for a reply.")
 
-# Handle Back to Main Menu
-def back_to_menu(update: Update, context: CallbackContext) -> None:
-    start(update.callback_query, context)
+# Handle Admin Replies
+def handle_admin_reply(update: Update, context: CallbackContext) -> None:
+    admin_message = update.message.text
+
+    # Check if the message starts with "reply:" to identify a reply to a user
+    if admin_message.startswith("reply:"):
+        try:
+            # Parse user ID and reply message
+            parts = admin_message.split(":", 2)
+            user_id = int(parts[1].strip())
+            reply_message = parts[2].strip()
+
+            # Send the reply to the user
+            context.bot.send_message(
+                chat_id=user_id,
+                text=f"📩 *Reply from Admin:*\n\n{reply_message}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            update.message.reply_text("✅ Reply sent to the user.")
+        except (IndexError, ValueError):
+            update.message.reply_text("❌ Invalid reply format. Use `reply:<user_id>:<message>`.")
+    else:
+        update.message.reply_text(
+            "❌ To reply to a user, use the format `reply:<user_id>:<message>`."
+        )
 
 # Callback Query Handler
 def handle_callbacks(update: Update, context: CallbackContext) -> None:
     query_data = update.callback_query.data
-    if query_data == 'view_services':
-        view_services(update, context)
-    elif query_data in ['service_web', 'service_bot', 'service_custom']:
-        handle_service_selection(update, context)
-    elif query_data == 'chat_admin':
+    if query_data == 'chat_admin':
         chat_admin(update, context)
-    elif query_data == 'back_to_menu':
-        back_to_menu(update, context)
 
 # Dummy HTTP Server
 class DummyServer(BaseHTTPRequestHandler):
@@ -113,10 +105,13 @@ def main():
     # Command Handlers
     dispatcher.add_handler(CommandHandler('start', start))
 
+    # Admin Replies Handler
+    dispatcher.add_handler(MessageHandler(Filters.text & Filters.chat(int(ADMIN_CHAT_ID)), handle_admin_reply))
+
     # Callback Query Handlers
     dispatcher.add_handler(CallbackQueryHandler(handle_callbacks))
 
-    # Message Handlers
+    # User Messages Handler
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_user_message))
 
     # Run the polling bot in a thread
